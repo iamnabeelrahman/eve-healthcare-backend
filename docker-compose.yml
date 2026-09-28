@@ -1,0 +1,68 @@
+version: '3.9'
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: eve
+      POSTGRES_PASSWORD: eve_password
+      POSTGRES_DB: eve_healthcare
+    ports:
+      - '5432:5432'
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U eve -d eve_healthcare']
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - '6379:6379'
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  api:
+    build: .
+    command: sh -c "npx prisma migrate deploy && node dist/server.js"
+    environment:
+      NODE_ENV: production
+      PORT: 3000
+      DATABASE_URL: postgresql://eve:eve_password@postgres:5432/eve_healthcare?schema=public
+      REDIS_URL: redis://redis:6379
+      JWT_SECRET: change-me-in-production-please-use-a-long-random-string
+      JWT_EXPIRATION: 1d
+      WEBHOOK_SECRET: dev-webhook-secret-change-me
+      LOG_LEVEL: info
+      PAYMENT_SIMULATION_MODE: random
+    ports:
+      - '3000:3000'
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  worker:
+    build: .
+    command: node dist/queues/webhook.worker.js
+    environment:
+      NODE_ENV: production
+      DATABASE_URL: postgresql://eve:eve_password@postgres:5432/eve_healthcare?schema=public
+      REDIS_URL: redis://redis:6379
+      JWT_SECRET: change-me-in-production-please-use-a-long-random-string
+      WEBHOOK_SECRET: dev-webhook-secret-change-me
+      LOG_LEVEL: info
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+volumes:
+  pgdata:
